@@ -75,8 +75,7 @@ class BeliefStateAgent(Agent):
         """
         pass
 
-    def _get_updated_belief(self, belief, evidences, pacman_position,
-            ghosts_eaten):
+    def _get_updated_belief(self, belief, evidences, pacman_position, ghosts_eaten):
         """
         Given a list of (noised) distances from pacman to ghosts,
         and the previous belief states before receiving the evidences,
