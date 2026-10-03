@@ -75,7 +75,8 @@ class BeliefStateAgent(Agent):
         """
         pass
 
-    def _get_updated_belief(self, belief, evidences, pacman_position, ghosts_eaten):
+    def _get_updated_belief(self, belief, evidences, pacman_position, 
+                            ghosts_eaten):
         """
         Given a list of (noised) distances from pacman to ghosts,
         and the previous belief states before receiving the evidences,
@@ -139,7 +140,7 @@ class BeliefStateAgent(Agent):
         XXX: DO NOT MODIFY THIS FUNCTION !!!
         Doing so will result in a 0 grade.
         """
-        belief = self._get_updated_belief(self.beliefGhostStates, evidences,
+        belief = self._get_updated_belief(self.beliefGhostStates, evidences, 
                                           pacman_position, ghosts_eaten)
         self.beliefGhostStates = belief
         return belief
