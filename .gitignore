@@ -20,5 +20,7 @@ env/
 *.out
 *.synctex.gz
 
+project2/*.csv
+
 **/temp
 AGENTS.md
