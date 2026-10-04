@@ -8,6 +8,7 @@ from scipy.stats import binom
 
 from typing import NamedTuple
 
+from pacman_module.pacman import GameState
 
 class Vector2i(NamedTuple):
     """
@@ -40,6 +41,22 @@ class Vector2i(NamedTuple):
     def west(self) -> Vector2i:
         """Return the neighboring coordinate to the west (x - 1)."""
         return Vector2i(self.x - 1, self.y)
+
+    @staticmethod
+    def try_parse(obj: tuple[int, ...] | list[int]) -> Vector2i | None:
+        """
+        Attempt to parse a tuple into a Vector2i.
+
+        Arguments:
+        ----------
+        - `obj`: A tuple containing coordinate values.
+
+        Return:
+        -------
+        - A `Vector2i` instance if `obj` has at least 2 elements,
+          otherwise `None`.
+        """
+        return Vector2i(obj[0], obj[1]) if len(obj) >= 2 else None
 
     def neighbours(self) -> list[Vector2i]:
         """Return a list of all 4 orthogonal neighboring coordinates."""
@@ -96,7 +113,10 @@ class BeliefStateAgent(Agent):
 
         # XXX: Your code here
         # NB: Adding code here is not necessarily useful, but you may.
-        
+        self.time: int = 0
+
+        self.history_uncertainty = []
+        self.history_error = []
         # XXX: End of your code
     
 
@@ -337,7 +357,7 @@ class BeliefStateAgent(Agent):
 
         return noisy_distances
 
-    def _record_metrics(self, belief_states, state):
+    def _record_metrics(self, belief_states: list[np.ndarray], state: GameState):
         """
         Use this function to record your metrics
         related to true and belief states.
@@ -355,7 +375,53 @@ class BeliefStateAgent(Agent):
 
         N.B. : [0,0] is the bottom left corner of the maze
         """
-        pass
+        _, width, height = self._try_get_walls()
+
+        ghost_positions = state.getGhostPositions()
+        ghosts_eaten = state.data._eaten[1:]
+
+        entropies = []
+        errors = []
+
+        print(f"t = {self.time}")
+
+        for ghost_idx, belief in enumerate(belief_states):
+            if ghosts_eaten[ghost_idx]:
+                continue
+
+            true_pos = Vector2i.try_parse(ghost_positions[ghost_idx])
+            if true_pos is None:
+                raise Exception(
+                    "Fatal Internal Error:"
+                    "Ghost's position can not be empty"
+                )
+            
+            positive_probs = belief[belief > 0]
+            entropy = -np.sum(positive_probs * np.log2(positive_probs))
+
+            expected_dist: float = 0.0
+            for x in range(width):
+                for y in range(height):
+                    pos = Vector2i(x, y)
+
+                    if belief[x, y] > 0:
+                        d = pos.manhattan_to(true_pos)
+                        expected_dist += belief[x, y] * d
+
+            entropies.append(entropy)
+            errors.append(expected_dist)
+
+        if entropies and errors:
+            self.history_uncertainty.append(float(np.mean(entropies)))
+            self.history_error.append(float(np.mean(errors)))
+
+            entropies.clear()
+            errors.clear()
+        
+            print(f"uncertainty: {self.history_uncertainty[-1]}")
+            print(f"error: {self.history_error[-1]}")
+
+        self.time += 1
 
     def get_action(self, state):
         """
