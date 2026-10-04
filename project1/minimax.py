@@ -1,87 +1,91 @@
+from math import inf
+
 from pacman_module.game import Agent, Directions
 
 
-def key(state):
-    """Returns a hashable key that uniquely identifies a game state.
-
-    Arguments:
-        state: a game state. See API or class `pacman.GameState`.
-
-    Returns:
-        A hashable key object.
-    """
-    return (
-        state.getPacmanPosition(),
-        state.getGhostPosition(1),
-        state.getGhostDirection(1),
-        state.getFood(),
-    )
-
-
 class PacmanAgent(Agent):
-    """Pacman agent based on the Minimax algorithm."""
+    """Pacman agent that uses exact Minimax search."""
 
     def __init__(self):
         super().__init__()
+        self._cache = {}
 
     def get_action(self, state):
-        """Given a Pacman game state, returns a legal move.
+        """Return the Pacman action with the best minimax value."""
+        legal = [
+            action
+            for action in state.getLegalActions(0)
+            if action != Directions.STOP
+        ]
+        if not legal:
+            return Directions.STOP
 
-        Arguments:
-            state: a game state. See API or class `pacman.GameState`.
+        self._cache.clear()
+        best_value = -inf
+        best_action = legal[0]
 
-        Returns:
-            A legal move as defined in `game.Directions`.
-        """
-        best_value = float('-inf')
-        best_action = Directions.STOP
-        path = {key(state)}
-
-        for successor, action in state.generatePacmanSuccessors():
-            value = self.min_value(successor, path)
-
+        for action in legal:
+            successor = state.generateSuccessor(0, action)
+            value = self._min_value(successor, 1)
             if value > best_value:
                 best_value = value
                 best_action = action
 
         return best_action
 
-    def min_value(self, state, path):
-        """Value of a ghost node (the ghost minimizes Pacman's score)."""
+    def _min_value(self, state, agent_index):
+        """Return the minimum value for the current ghost."""
         if state.isWin() or state.isLose():
             return state.getScore()
 
-        current = key(state)
+        key = (state, agent_index)
+        if key in self._cache:
+            return self._cache[key]
 
-        if current in path:
+        legal = [
+            action
+            for action in state.getLegalActions(agent_index)
+            if action != Directions.STOP
+        ]
+        if not legal:
             return state.getScore()
 
-        path.add(current)
-        value = float('inf')
+        value = inf
+        last_agent = state.getNumAgents() - 1
+        next_index = agent_index + 1
 
-        for successor, _ in state.generateGhostSuccessors(1):
-            value = min(value, self.max_value(successor, path))
+        for action in legal:
+            successor = state.generateSuccessor(agent_index, action)
+            if agent_index == last_agent:
+                child_value = self._max_value(successor)
+            else:
+                child_value = self._min_value(successor, next_index)
+            value = min(value, child_value)
 
-        path.discard(current)
-
+        self._cache[key] = value
         return value
 
-    def max_value(self, state, path):
-        """Value of a Pacman node (Pacman maximizes his score)."""
+    def _max_value(self, state):
+        """Return the maximum value for Pacman."""
         if state.isWin() or state.isLose():
             return state.getScore()
 
-        current = key(state)
+        key = (state, 0)
+        if key in self._cache:
+            return self._cache[key]
 
-        if current in path:
+        legal = [
+            action
+            for action in state.getLegalActions(0)
+            if action != Directions.STOP
+        ]
+        if not legal:
             return state.getScore()
 
-        path.add(current)
-        value = float('-inf')
+        value = -inf
+        for action in legal:
+            successor = state.generateSuccessor(0, action)
+            value = max(value, self._min_value(successor, 1))
 
-        for successor, _ in state.generatePacmanSuccessors():
-            value = max(value, self.min_value(successor, path))
-
-        path.discard(current)
-
+        self._cache[key] = value
         return value
