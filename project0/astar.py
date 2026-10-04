@@ -1,29 +1,20 @@
-from collections.abc import Sequence
 from heapq import heappop, heappush
-from typing import Optional
+from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
 
 from pacman_module.game import Agent, Grid
 from pacman_module.pacman import Directions, GameState
 
-type GridLikeTuple = tuple[tuple[bool, ...]]
-type Vector2i = tuple[int, int]
 
-type FoodState = None | GridLikeTuple | Grid
-type Key = tuple[Vector2i, FoodState, tuple[Vector2i, ...]]
+GridLikeTuple = Tuple[Tuple[bool, ...], ...]
+Vector2i = Tuple[int, int]
+FoodState = Optional[Union[GridLikeTuple, Grid]]
+Key = Tuple[Vector2i, FoodState, Tuple[Vector2i, ...]]
+DistanceMap = Dict[Vector2i, Dict[Vector2i, int]]
+SearchNode = Tuple[int, int, int, GameState, List[str], int]
+
 
 def key(state: GameState) -> Key:
-    """
-    Returns a key that uniquely identifies a Pacman game state.
-
-    Arguments:
-    ----------
-    - `state`: the current game state. See FAQ and class
-               `pacman.GameState`.
-
-    Return:
-    -------
-    - A hashable key object that uniquely identifies a Pacman game state.
-    """
+    """Return a hashable key that uniquely identifies a game state."""
     return (
         state.getPacmanPosition(),
         state.getFood(),
@@ -32,36 +23,19 @@ def key(state: GameState) -> Key:
 
 
 class PacmanAgent(Agent):
-    """
-    A Pacman agent based on A* (A star) Search.
-    """
+    """A Pacman agent based on A-star search."""
 
     def __init__(self, args) -> None:
-        """
-        Arguments:
-        ----------
-        - `args`: Namespace of arguments from command-line prompt.
-        """
+        """Initialize an agent from the command-line arguments namespace."""
         super().__init__()
         self.args = args
-        self.moves: list[Directions] = []
+        self.moves: List[str] = []
         self._walls: Optional[Grid] = None
-        self._dist_map: dict[Vector2i, dict[Vector2i, int]] = {}
-        self._mst_cache: dict[tuple[Vector2i, ...], int] = {}
+        self._dist_map: DistanceMap = {}
+        self._mst_cache: Dict[Tuple[Vector2i, ...], int] = {}
 
-    def get_action(self, state: GameState):
-        """
-        Given a pacman game state, returns a legal move.
-
-        Arguments:
-        ----------
-        - `state`: the current game state. See FAQ and class
-                   `pacman.GameState`.
-
-        Return:
-        -------
-        - A legal move as defined in `game.Directions`.
-        """
+    def get_action(self, state: GameState) -> str:
+        """Return the next legal move for the current game state."""
         if not self.moves:
             self.moves = self.astar(state)
 
@@ -71,13 +45,7 @@ class PacmanAgent(Agent):
             return Directions.STOP
 
     def _init_maze(self, state: GameState) -> None:
-        """
-        Precomputes all-pairs shortest path maze distances.
-
-        Arguments:
-        ----------
-        - `state`: a game state used to extract maze walls.
-        """
+        """Precompute shortest-path distances between passable cells."""
         walls = state.getWalls()
         self._walls = walls
         width = walls.width
@@ -91,79 +59,68 @@ class PacmanAgent(Agent):
         ]
 
         self._dist_map = {}
-        for src in passable:
-            d: dict[Vector2i, int] = {src: 0}
-            queue = [src]
-            for u in queue:
+        for source in passable:
+            distances = {source: 0}
+            queue = [source]
+
+            for current in queue:
                 for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                    v = (u[0] + dx, u[1] + dy)
-                    if 0 <= v[0] < width and 0 <= v[1] < height:
-                        if not walls[v[0]][v[1]] and v not in d:
-                            d[v] = d[u] + 1
-                            queue.append(v)
-            self._dist_map[src] = d
+                    neighbor = (current[0] + dx, current[1] + dy)
+                    x, y = neighbor
+                    if not (0 <= x < width and 0 <= y < height):
+                        continue
+                    if walls[x][y] or neighbor in distances:
+                        continue
+
+                    distances[neighbor] = distances[current] + 1
+                    queue.append(neighbor)
+
+            self._dist_map[source] = distances
 
         self._mst_cache = {}
 
     def _compute_mst(self, food_list: Sequence[Vector2i]) -> int:
-        """
-        Computes the weight of the Minimum Spanning Tree of food positions.
-
-        Arguments:
-        ----------
-        - `food_list`: a sequence of food coordinates.
-
-        Return:
-        -------
-        - The sum of edge weights in the MST.
-        """
-        n = len(food_list)
-        if n <= 1:
+        """Return the minimum-spanning-tree weight of the food positions."""
+        number_of_food = len(food_list)
+        if number_of_food <= 1:
             return 0
 
-        dist_map = self._dist_map
-        in_tree = [False] * n
-        min_dist = [float("inf")] * n
-        min_dist[0] = 0.0
+        in_tree = [False] * number_of_food
+        minimum_distances = [float("inf")] * number_of_food
+        minimum_distances[0] = 0.0
         mst_cost = 0
 
-        for _ in range(n):
-            u = -1
-            u_dist = float("inf")
-            for i in range(n):
-                if not in_tree[i] and min_dist[i] < u_dist:
-                    u_dist = min_dist[i]
-                    u = i
+        for _ in range(number_of_food):
+            closest_index = -1
+            closest_distance = float("inf")
 
-            in_tree[u] = True
-            mst_cost += int(u_dist)
-            u_pos = food_list[u]
-            u_dists = dist_map.get(u_pos, {})
+            for index in range(number_of_food):
+                if (
+                    not in_tree[index]
+                    and minimum_distances[index] < closest_distance
+                ):
+                    closest_distance = minimum_distances[index]
+                    closest_index = index
 
-            for v in range(n):
-                if not in_tree[v]:
-                    d = u_dists.get(food_list[v], float("inf"))
-                    if d < min_dist[v]:
-                        min_dist[v] = d
+            in_tree[closest_index] = True
+            mst_cost += int(closest_distance)
+            current_food = food_list[closest_index]
+            current_distances = self._dist_map.get(current_food, {})
+
+            for index in range(number_of_food):
+                if in_tree[index]:
+                    continue
+
+                distance = current_distances.get(
+                    food_list[index], float("inf")
+                )
+                if distance < minimum_distances[index]:
+                    minimum_distances[index] = distance
 
         return mst_cost
 
     def h(self, state: GameState) -> int:
-        """
-        Computes an admissible and consistent heuristic for A* search.
-
-        Estimates the minimum cost (steps) to collect all remaining food dots
-        from the given state by combining the distance to the nearest food
-        with the Minimum Spanning Tree (MST) weight of all remaining food.
-
-        Arguments:
-        ----------
-        - `state`: the current game state.
-
-        Return:
-        -------
-        - The heuristic estimate as an integer.
-        """
+        """Estimate the remaining cost with nearest-food plus food MST."""
         walls = state.getWalls()
         if self._walls is not walls:
             self._init_maze(state)
@@ -172,56 +129,42 @@ class PacmanAgent(Agent):
         if not food_list:
             return 0
 
-        pos = state.getPacmanPosition()
+        position = state.getPacmanPosition()
         food_tuple = tuple(sorted(food_list))
         if food_tuple not in self._mst_cache:
             self._mst_cache[food_tuple] = self._compute_mst(food_list)
 
         mst_cost = self._mst_cache[food_tuple]
-        pos_dists = self._dist_map.get(pos, {})
-        min_food_dist = min(
-            pos_dists.get(f, float("inf")) for f in food_list
+        position_distances = self._dist_map.get(position, {})
+        nearest_food = min(
+            position_distances.get(food, float("inf"))
+            for food in food_list
         )
-        return int(min_food_dist + mst_cost)
+        return int(nearest_food + mst_cost)
 
-    def astar(self, state: GameState) -> list[Directions]:
-        """
-        Given a pacman game state,
-        returns a list of legal moves to solve the search layout.
-
-        Arguments:
-        ----------
-        - `state`: the current game state. See FAQ and class
-                   `pacman.GameState`.
-
-        Return:
-        -------
-        - A list of legal moves as defined in `game.Directions`.
-        """
+    def astar(self, state: GameState) -> List[str]:
+        """Return an optimal sequence of moves that solves the layout."""
         walls = state.getWalls()
         if self._walls is not walls:
             self._init_maze(state)
 
-        start_h = self.h(state)
+        start_heuristic = self.h(state)
         counter = 0
-        fringe: list[
-            tuple[int, int, int, GameState, list[Directions], int]
-        ] = []
-        heappush(fringe, (start_h, 0, counter, state, [], 0))
-        closed: set[Key] = set()
-        best_g: dict[Key, int] = {}
-        best_g[key(state)] = 0
+        fringe: List[SearchNode] = []
+        heappush(fringe, (start_heuristic, 0, counter, state, [], 0))
+        closed: Set[Key] = set()
+        best_cost: Dict[Key, int] = {key(state): 0}
 
         while fringe:
-            f, neg_g, _, current, path, g = heappop(fringe)
+            _, _, _, current, path, cost = heappop(fringe)
 
             if current.isWin():
                 return path
 
-            cur_key = key(current)
-            if cur_key in closed:
+            current_key = key(current)
+            if current_key in closed:
                 continue
-            closed.add(cur_key)
+            closed.add(current_key)
 
             successors = current.generatePacmanSuccessors()
             if successors is None:
@@ -232,24 +175,22 @@ class PacmanAgent(Agent):
                 if next_key in closed:
                     continue
 
-                next_g = g + 1
-                if next_key in best_g and best_g[next_key] <= next_g:
+                next_cost = cost + 1
+                if best_cost.get(next_key, float("inf")) <= next_cost:
                     continue
 
-                best_g[next_key] = next_g
-                next_h = self.h(next_state)
+                best_cost[next_key] = next_cost
                 counter += 1
                 heappush(
                     fringe,
                     (
-                        next_g + next_h,
-                        -next_g,
+                        next_cost + self.h(next_state),
+                        -next_cost,
                         counter,
                         next_state,
                         path + [action],
-                        next_g,
+                        next_cost,
                     ),
                 )
 
         return []
-
