@@ -20,6 +20,10 @@ env/
 *.out
 *.synctex.gz
 
+p0_*
+p1_*
+p2_*
+
 diagram/
 
 project2/*.csv
