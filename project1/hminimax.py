@@ -10,14 +10,7 @@ FOOD_LEFT_WEIGHT = 10
 
 
 def key(state):
-    """Returns a hashable key that uniquely identifies a game state.
-
-    Arguments:
-        state: a game state. See API or class `pacman.GameState`.
-
-    Returns:
-        A hashable key object.
-    """
+  
     return (
         state.getPacmanPosition(),
         state.getGhostPosition(1),
@@ -27,15 +20,7 @@ def key(state):
 
 
 def bfs_distances(walls, source):
-    """Maze distances from `source` to every reachable cell.
-
-    Arguments:
-        walls: grid of walls, see `state.getWalls()`.
-        source: (x, y) starting cell.
-
-    Returns:
-        A dictionary mapping each reachable cell to its distance.
-    """
+   
     dist = {source: 0}
     fringe = deque([source])
 
@@ -51,21 +36,13 @@ def bfs_distances(walls, source):
 
 
 class PacmanAgent(Agent):
-    """Pacman agent based on the H-Minimax algorithm."""
 
     def __init__(self):
         super().__init__()
         self.cache = {}
 
     def get_action(self, state):
-        """Given a Pacman game state, returns a legal move.
-
-        Arguments:
-            state: a game state. See API or class `pacman.GameState`.
-
-        Returns:
-            A legal move as defined in `game.Directions`.
-        """
+      
         self.cache = {}
         alpha = float('-inf')
         beta = float('inf')
@@ -85,14 +62,14 @@ class PacmanAgent(Agent):
         return best_action
 
     def distances(self, walls, source):
-        """Cached maze distances from `source`."""
+        
         if source not in self.cache:
             self.cache[source] = bfs_distances(walls, source)
 
         return self.cache[source]
 
     def evaluate(self, state):
-        """Heuristic value of a non-terminal state for Pacman."""
+
         walls = state.getWalls()
         pacman = state.getPacmanPosition()
         dist = self.distances(walls, pacman)
@@ -114,7 +91,7 @@ class PacmanAgent(Agent):
         return value
 
     def min_value(self, state, alpha, beta, depth, path):
-        """Value of a ghost node (the ghost minimizes Pacman's score)."""
+
         if state.isWin() or state.isLose():
             return state.getScore()
 
@@ -144,7 +121,7 @@ class PacmanAgent(Agent):
         return value
 
     def max_value(self, state, alpha, beta, depth, path):
-        """Value of a Pacman node (Pacman maximizes his score)."""
+
         if state.isWin() or state.isLose():
             return state.getScore()
 
