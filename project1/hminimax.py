@@ -1,207 +1,175 @@
-"""Depth-limited minimax Pacman agent with alpha-beta pruning."""
-
 from collections import deque
-from math import inf
 
 from pacman_module.game import Agent, Directions
 
+DEPTH = 4
+GHOST_RADIUS = 3
+GHOST_WEIGHT = 40
+FOOD_WEIGHT = 1.5
+FOOD_LEFT_WEIGHT = 10
 
-Position = tuple[int, int]
+
+def key(state):
+    """Returns a hashable key that uniquely identifies a game state.
+
+    Arguments:
+        state: a game state. See API or class `pacman.GameState`.
+
+    Returns:
+        A hashable key object.
+    """
+    return (
+        state.getPacmanPosition(),
+        state.getGhostPosition(1),
+        state.getGhostDirection(1),
+        state.getFood(),
+    )
+
+
+def bfs_distances(walls, source):
+    """Maze distances from `source` to every reachable cell.
+
+    Arguments:
+        walls: grid of walls, see `state.getWalls()`.
+        source: (x, y) starting cell.
+
+    Returns:
+        A dictionary mapping each reachable cell to its distance.
+    """
+    dist = {source: 0}
+    fringe = deque([source])
+
+    while fringe:
+        x, y = fringe.popleft()
+
+        for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if (nx, ny) not in dist and not walls[nx][ny]:
+                dist[(nx, ny)] = dist[(x, y)] + 1
+                fringe.append((nx, ny))
+
+    return dist
 
 
 class PacmanAgent(Agent):
-    """Choose actions using heuristic minimax search."""
+    """Pacman agent based on the H-Minimax algorithm."""
 
     def __init__(self):
         super().__init__()
-        self._distances: dict[Position, dict[Position, int]] = {}
-        self._visits = {}
-        self._walls = None
+        self.cache = {}
 
     def get_action(self, state):
-        """Return the best legal action found by H-Minimax."""
-        if state.isWin() or state.isLose():
-            return Directions.STOP
+        """Given a Pacman game state, returns a legal move.
 
-        self._prepare_maze(state)
-        state_key = self._visit_key(state)
-        self._visits[state_key] = self._visits.get(state_key, 0) + 1
-        depth = self._search_depth(state)
-        _, action = self._max_value(state, depth, -inf, inf)
+        Arguments:
+            state: a game state. See API or class `pacman.GameState`.
 
-        if action is not None:
-            return action
+        Returns:
+            A legal move as defined in `game.Directions`.
+        """
+        self.cache = {}
+        alpha = float('-inf')
+        beta = float('inf')
+        best_value = float('-inf')
+        best_action = Directions.STOP
+        path = {key(state)}
 
-        legal = state.getLegalPacmanActions()
-        non_stop = [move for move in legal if move != Directions.STOP]
-        return non_stop[0] if non_stop else Directions.STOP
-
-    def _max_value(self, state, depth, alpha, beta):
-        """Return the value and action of a Pacman (MAX) node."""
-        if self._finished(state) or depth == 0:
-            return self._evaluate(state), None
-
-        successors = state.generatePacmanSuccessors()
-        if not successors:
-            return self._evaluate(state), None
-
-        successors.sort(
-            key=lambda item: self._evaluate(item[0]), reverse=True
-        )
-        best_value = -inf
-        best_action = None
-
-        for successor, action in successors:
-            if successor.isWin() or successor.isLose():
-                value = self._evaluate(successor)
-            else:
-                value = self._min_value(
-                    successor, 1, depth, alpha, beta
-                )
-
-            value -= 35.0 * self._visits.get(
-                self._visit_key(successor), 0
-            )
+        for successor, action in state.generatePacmanSuccessors():
+            value = self.min_value(successor, alpha, beta, DEPTH - 1, path)
 
             if value > best_value:
                 best_value = value
                 best_action = action
 
             alpha = max(alpha, best_value)
-            if alpha >= beta:
-                break
 
-        return best_value, best_action
+        return best_action
 
-    def _min_value(self, state, agent_index, depth, alpha, beta):
-        """Return the value of a ghost (MIN) node."""
-        if self._finished(state):
-            return self._evaluate(state)
+    def distances(self, walls, source):
+        """Cached maze distances from `source`."""
+        if source not in self.cache:
+            self.cache[source] = bfs_distances(walls, source)
 
-        successors = state.generateGhostSuccessors(agent_index)
-        if not successors:
-            return self._evaluate(state)
+        return self.cache[source]
 
-        successors.sort(key=lambda item: self._evaluate(item[0]))
-        best_value = inf
+    def evaluate(self, state):
+        """Heuristic value of a non-terminal state for Pacman."""
+        walls = state.getWalls()
+        pacman = state.getPacmanPosition()
+        dist = self.distances(walls, pacman)
+        value = state.getScore()
 
-        for successor, _ in successors:
-            next_agent = agent_index + 1
-            if successor.isWin() or successor.isLose():
-                value = self._evaluate(successor)
-            elif next_agent == state.getNumAgents():
-                value, _ = self._max_value(
-                    successor, depth - 1, alpha, beta
-                )
-            else:
-                value = self._min_value(
-                    successor, next_agent, depth, alpha, beta
-                )
+        foods = state.getFood().asList()
 
-            best_value = min(best_value, value)
-            beta = min(beta, best_value)
-            if beta <= alpha:
-                break
+        if foods:
+            nearest = min(dist.get(food, 1000) for food in foods)
+            value -= FOOD_WEIGHT * nearest
+            value -= FOOD_LEFT_WEIGHT * len(foods)
 
-        return best_value
+        ghost = tuple(int(round(c)) for c in state.getGhostPosition(1))
+        gdist = dist.get(ghost, 1000)
 
-    @staticmethod
-    def _finished(state):
-        """Return whether no more actions should be searched from state."""
-        return state.isWin() or state.isLose()
+        if gdist < GHOST_RADIUS:
+            value -= GHOST_WEIGHT * (GHOST_RADIUS - gdist)
 
-    def _evaluate(self, state):
-        """Estimate the utility of a non-terminal game state."""
+        return value
+
+    def min_value(self, state, alpha, beta, depth, path):
+        """Value of a ghost node (the ghost minimizes Pacman's score)."""
         if state.isWin() or state.isLose():
             return state.getScore()
 
-        pacman = self._integer_position(state.getPacmanPosition())
-        food = state.getFood().asList()
-        value = state.getScore()
+        if depth <= 0:
+            return self.evaluate(state)
 
-        if food:
-            food_distances = [self._distance(pacman, dot) for dot in food]
-            nearest_food = min(food_distances)
-            value -= 8.0 * nearest_food
-            value -= 12.0 * len(food)
+        current = key(state)
 
-        value -= 25.0 * self._visits.get(self._visit_key(state), 0)
+        if current in path:
+            return state.getScore()
 
-        ghost_distances = [
-            self._distance(
-                pacman, self._integer_position(state.getGhostPosition(index))
+        path.add(current)
+        value = float('inf')
+
+        for successor, _ in state.generateGhostSuccessors(1):
+            value = min(
+                value, self.max_value(successor, alpha, beta, depth, path)
             )
-            for index in range(1, state.getNumAgents())
-        ]
-        if ghost_distances:
-            nearest_ghost = min(ghost_distances)
-            if nearest_ghost <= 1:
-                value -= 40.0
-            elif nearest_ghost == 2:
-                value -= 18.0
-            elif nearest_ghost == 3:
-                value -= 6.0
-            else:
-                value += min(nearest_ghost, 10) * 2.0
 
-        legal_moves = [
-            action
-            for action in state.getLegalPacmanActions()
-            if action != Directions.STOP
-        ]
-        value += 3.0 * len(legal_moves)
+            if value <= alpha:
+                break
+
+            beta = min(beta, value)
+
+        path.discard(current)
+
         return value
 
-    def _visit_key(self, state):
-        """Identify repeated positions that made no food progress."""
-        return (
-            self._integer_position(state.getPacmanPosition()),
-            tuple(state.getFood().asList()),
-        )
+    def max_value(self, state, alpha, beta, depth, path):
+        """Value of a Pacman node (Pacman maximizes his score)."""
+        if state.isWin() or state.isLose():
+            return state.getScore()
 
-    @staticmethod
-    def _integer_position(position):
-        """Convert an agent position to a grid coordinate."""
-        return tuple(int(coordinate) for coordinate in position)
+        if depth <= 0:
+            return self.evaluate(state)
 
-    def _prepare_maze(self, state):
-        """Clear cached distances when a different maze is loaded."""
-        walls = state.getWalls()
-        if walls is not self._walls:
-            self._walls = walls
-            self._distances.clear()
+        current = key(state)
 
-    def _distance(self, start, goal):
-        """Return the shortest path length between two maze positions."""
-        if start not in self._distances:
-            self._distances[start] = self._distances_from(start)
-        return self._distances[start].get(goal, inf)
+        if current in path:
+            return state.getScore()
 
-    def _distances_from(self, start):
-        """Compute shortest path lengths from one maze position."""
-        distances = {start: 0}
-        queue = deque([start])
+        path.add(current)
+        value = float('-inf')
 
-        while queue:
-            x, y = queue.popleft()
-            for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0)):
-                neighbor = (x + dx, y + dy)
-                if neighbor in distances:
-                    continue
-                if self._walls[neighbor[0]][neighbor[1]]:
-                    continue
-                distances[neighbor] = distances[(x, y)] + 1
-                queue.append(neighbor)
+        for successor, _ in state.generatePacmanSuccessors():
+            value = max(
+                value,
+                self.min_value(successor, alpha, beta, depth - 1, path),
+            )
 
-        return distances
+            if value >= beta:
+                break
 
-    @staticmethod
-    def _search_depth(state):
-        """Use an extra search round on very small mazes."""
-        walls = state.getWalls()
-        open_cells = sum(
-            not walls[x][y]
-            for x in range(walls.width)
-            for y in range(walls.height)
-        )
-        return 4 if open_cells <= 20 else 3
+            alpha = max(alpha, value)
+
+        path.discard(current)
+
+        return value
