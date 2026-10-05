@@ -49,8 +49,8 @@ class PacmanAgent(Agent):
 
         target_positions: list[Vector2i] = []
         for ghost_belief in alive_ghosts:
-            x, y = np.unravel_index(np.argmax(ghost_belief), 
-                                                    ghost_belief.shape)
+            x, y = np.unravel_index(np.argmax(ghost_belief),
+                                    ghost_belief.shape)
             target_positions.append(Vector2i(int(x), int(y)))
 
         target_pos = Vector2i(-1, -1)

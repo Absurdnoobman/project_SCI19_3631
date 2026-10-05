@@ -20,7 +20,11 @@ env/
 *.out
 *.synctex.gz
 
+diagram/
+
 project2/*.csv
+
+grade_test/
 
 **/temp
 AGENTS.md
