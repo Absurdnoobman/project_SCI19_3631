@@ -12,5 +12,15 @@ venv/
 .venv/
 env/
 
+*.aux
+*.bbl
+*.fdb_latexmk
+*.blg
+*.fls
+*.out
+*.synctex.gz
+
+project2/*.csv
+
 **/temp
 AGENTS.md

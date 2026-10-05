@@ -1,9 +1,84 @@
 # Complete this class for all parts of the project
 
-from pacman_module.game import Agent
+from __future__ import annotations
+from pacman_module.game import Agent, Grid
 import numpy as np
 from pacman_module import util
 from scipy.stats import binom
+
+from typing import NamedTuple
+
+from pacman_module.pacman import GameState
+
+class Vector2i(NamedTuple):
+    """
+    A 2D integer vector representing grid coordinates (x, y).
+
+    Attributes:
+    -----------
+    - `x`: Integer horizontal coordinate.
+    - `y`: Integer vertical coordinate.
+    """
+    x: int
+    y: int
+
+    @property
+    def north(self) -> Vector2i:
+        """Return the neighboring coordinate to the north (y + 1)."""
+        return Vector2i(self.x, self.y + 1)
+
+    @property
+    def south(self) -> Vector2i:
+        """Return the neighboring coordinate to the south (y - 1)."""
+        return Vector2i(self.x, self.y - 1)
+
+    @property
+    def east(self) -> Vector2i:
+        """Return the neighboring coordinate to the east (x + 1)."""
+        return Vector2i(self.x + 1, self.y)
+
+    @property
+    def west(self) -> Vector2i:
+        """Return the neighboring coordinate to the west (x - 1)."""
+        return Vector2i(self.x - 1, self.y)
+
+    @staticmethod
+    def try_parse(obj: tuple[int, ...] | list[int]) -> Vector2i | None:
+        """
+        Attempt to parse a tuple into a Vector2i.
+
+        Arguments:
+        ----------
+        - `obj`: A tuple containing coordinate values.
+
+        Return:
+        -------
+        - A `Vector2i` instance if `obj` has at least 2 elements,
+          otherwise `None`.
+        """
+        return Vector2i(obj[0], obj[1]) if len(obj) >= 2 else None
+
+    def neighbours(self) -> list[Vector2i]:
+        """Return a list of all 4 orthogonal neighboring coordinates."""
+        return [self.north, self.south, self.east, self.west]
+
+    def manhattan_to(self, other: tuple[int, int]) -> int:
+        """
+        Compute Manhattan distance to another coordinate.
+
+        Arguments:
+        ----------
+        - `other`: (x, y) coordinate as a tuple or Vector2i.
+
+        Return:
+        -------
+        - The L1 (Manhattan) distance.
+        """
+        return util.manhattanDistance(self, other)
+
+    def __add__(self, rhs: tuple[int, int]) -> Vector2i:
+        """Add another coordinate offset to this vector."""
+        return Vector2i(self.x + rhs[0], self.y + rhs[1])
 
 
 class BeliefStateAgent(Agent):
@@ -38,10 +113,31 @@ class BeliefStateAgent(Agent):
 
         # XXX: Your code here
         # NB: Adding code here is not necessarily useful, but you may.
+        self.time: int = 0
+
+        self.history_uncertainty = []
+        self.history_error = []
         # XXX: End of your code
+    
 
+    def _try_get_walls(self) -> tuple[Grid, int, int]:
+        """
+        A function to safely retrieves `self.walls` and its dimensions.
 
-    def _get_sensor_model(self, pacman_position, evidence):
+        Return:
+        -------
+        - A `Grid` object representing the maze walls.
+        - An integer representing the width of the maze.
+        - An integer representing the height of the maze.
+        """
+        if self.walls is None or not isinstance(self.walls, Grid):
+            raise ValueError("self.walls has not been initialized.")
+
+        return self.walls, self.walls.width, self.walls.height
+        
+    def _get_sensor_model(self, 
+                          pacman_position: Vector2i, 
+                          evidence: float):
         """
         Arguments:
         ----------
@@ -56,9 +152,27 @@ class BeliefStateAgent(Agent):
         The element at position (w, h) is the probability
         P(E_t=evidence | X_t=(w, h))
         """
-        pass
+        walls, width, height = self._try_get_walls()
 
-    def _get_transition_model(self, pacman_position):
+        result = np.zeros((width, height))
+
+        for x in range(width):
+            for y in range(height):
+                if walls[x][y]:
+                    continue # if (x, y) is a wall then skip.
+
+                this_position = Vector2i(x, y)
+
+                distance: int = this_position.manhattan_to(pacman_position)
+                noise = evidence - distance
+                k = noise + (self.n * self.p)
+
+                if 0 <= k <= self.n:
+                    result[x, y] = binom.pmf(k, self.n, self.p)
+
+        return result
+
+    def _get_transition_model(self, pacman_position: Vector2i):
         """
         Arguments:
         ----------
@@ -73,10 +187,57 @@ class BeliefStateAgent(Agent):
         The element at position (w1, h1, w2, h2) is the probability
         P(X_t+1=(w1, h1) | X_t=(w2, h2))
         """
-        pass
+        walls, width, height = self._try_get_walls()
 
-    def _get_updated_belief(self, belief, evidences, pacman_position,
-            ghosts_eaten):
+        transition_model = np.zeros((width, height, width, height))
+
+        ghost_weights = {"scared": 8, "afraid": 2, "confused": 1}
+        scare_weight = ghost_weights.get(self.ghost_type, 1)
+
+        for w2 in range(width):
+            for h2 in range(height):
+                if walls[w2][h2]:
+                    continue 
+                # again, ignore the walls since ghost can not move 
+                # to a wall. 
+                # unless it that a null zone which lead to the backrooms.
+                current_position = Vector2i(w2, h2)
+
+                current_distant = current_position.manhattan_to(pacman_position)
+
+                legal_neighbour: list[Vector2i] = []
+                for direction in current_position.neighbours():
+                    if (0 <= direction.x < width 
+                        and 0 <= direction.y < height 
+                        and not walls[direction.x][direction.y]):
+                            legal_neighbour.append(direction)
+
+                move_weights: dict[Vector2i, int] = {}
+
+                for neighbour in legal_neighbour:
+                    neighbour_distant = neighbour.manhattan_to(pacman_position)
+                    
+                    weight = scare_weight if \
+                    neighbour_distant >= current_distant \
+                    else 1 
+
+                    move_weights[neighbour] = weight
+
+                total_weight = sum(move_weights.values())
+
+                if total_weight > 0:
+                    for neighbour, weight in move_weights.items():
+                        transition_model[
+                            neighbour.x, neighbour.y, w2, h2
+                            ] = weight / total_weight
+
+        return transition_model
+
+    def _get_updated_belief(self, 
+                            belief: list[np.ndarray], 
+                            evidences: list[int], 
+                            pacman_position: Vector2i, 
+                            ghosts_eaten: list[bool]):
         """
         Given a list of (noised) distances from pacman to ghosts,
         and the previous belief states before receiving the evidences,
@@ -107,12 +268,33 @@ class BeliefStateAgent(Agent):
         N.B. : [0,0] is the bottom left corner of the maze.
                Matrices filled with zeros must be returned for eaten ghosts.
         """
+        _, width, height = self._try_get_walls()
 
-        # XXX: Your code here
+        new_belief = []
 
-        # XXX: End of your code
+        trans_mdl = self._get_transition_model(pacman_position)
 
-        return belief
+        for ghost_i in range(len(belief)):
+            if ghosts_eaten[ghost_i]:
+                new_belief.append(np.zeros((width, height)))
+                continue
+
+            previous_belief = belief[ghost_i]
+
+            predicted_belief = np.tensordot(trans_mdl, previous_belief, 
+                                           axes=([2, 3], [0, 1]))
+
+            sensor_mdl = self._get_sensor_model(pacman_position, 
+                                                evidences[ghost_i])
+
+            unnormalised = predicted_belief * sensor_mdl
+            total = np.sum(unnormalised)
+            if total > 0:
+                new_belief.append(unnormalised / total)
+            else:
+                new_belief.append(predicted_belief)
+
+        return new_belief
 
     def update_belief_state(self, evidences, pacman_position, ghosts_eaten):
         """
@@ -140,7 +322,7 @@ class BeliefStateAgent(Agent):
         XXX: DO NOT MODIFY THIS FUNCTION !!!
         Doing so will result in a 0 grade.
         """
-        belief = self._get_updated_belief(self.beliefGhostStates, evidences,
+        belief = self._get_updated_belief(self.beliefGhostStates, evidences, 
                                           pacman_position, ghosts_eaten)
         self.beliefGhostStates = belief
         return belief
@@ -175,7 +357,7 @@ class BeliefStateAgent(Agent):
 
         return noisy_distances
 
-    def _record_metrics(self, belief_states, state):
+    def _record_metrics(self, belief_states: list[np.ndarray], state: GameState):
         """
         Use this function to record your metrics
         related to true and belief states.
@@ -193,7 +375,53 @@ class BeliefStateAgent(Agent):
 
         N.B. : [0,0] is the bottom left corner of the maze
         """
-        pass
+        _, width, height = self._try_get_walls()
+
+        ghost_positions = state.getGhostPositions()
+        ghosts_eaten = state.data._eaten[1:]
+
+        entropies = []
+        errors = []
+
+        print(f"t = {self.time}")
+
+        for ghost_idx, belief in enumerate(belief_states):
+            if ghosts_eaten[ghost_idx]:
+                continue
+
+            true_pos = Vector2i.try_parse(ghost_positions[ghost_idx])
+            if true_pos is None:
+                raise Exception(
+                    "Fatal Internal Error:"
+                    "Ghost's position can not be empty"
+                )
+            
+            positive_probs = belief[belief > 0]
+            entropy = -np.sum(positive_probs * np.log2(positive_probs))
+
+            expected_dist: float = 0.0
+            for x in range(width):
+                for y in range(height):
+                    pos = Vector2i(x, y)
+
+                    if belief[x, y] > 0:
+                        d = pos.manhattan_to(true_pos)
+                        expected_dist += belief[x, y] * d
+
+            entropies.append(entropy)
+            errors.append(expected_dist)
+
+        if entropies and errors:
+            self.history_uncertainty.append(float(np.mean(entropies)))
+            self.history_error.append(float(np.mean(errors)))
+
+            entropies.clear()
+            errors.clear()
+        
+            print(f"uncertainty: {self.history_uncertainty[-1]}")
+            print(f"error: {self.history_error[-1]}")
+
+        self.time += 1
 
     def get_action(self, state):
         """
